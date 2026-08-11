@@ -98,11 +98,47 @@ Beldex is a private-by-default (Monero-family) chain, so this SDK is payments-or
 - `signMessage`/`verifyMessage` are **reserved but not yet implemented** by the wallet (its WASM core exposes no signing primitives — see `docs/PHASE4_CAPABILITY_REPORT.md`); calls currently fail with `-32601`.
 - Before `connect()`, a page can only learn that a wallet exists (`getState()`).
 
+## React
+
+```tsx
+import { BeldexProvider, ConnectButton, useConnect, useBalance, fromAtomic } from 'bdx-web3js/react'
+
+function App() {
+  return (
+    <BeldexProvider>
+      <ConnectButton />
+      <Balance />
+    </BeldexProvider>
+  )
+}
+
+function Balance() {
+  const { isConnected } = useConnect()
+  const { balance } = useBalance({ pollMs: 15000 })
+  return isConnected && balance ? <p>{fromAtomic(balance.unlocked)} BDX</p> : null
+}
+```
+
+Hooks: `useBeldex()` (full context incl. the raw `BeldexWeb3` client), `useConnect()`, `useBalance({ pollMs })`. `react >= 18` is an optional peer dependency — plain-JS users install nothing extra. See `examples/react-demo`.
+
 ## API surface
 
-`detectProvider(opts?)` · `new BeldexWeb3(provider, opts?)` · `connect()` · `disconnect()` · `getAddress()` · `getBalance()` · `sendTransaction(params)` · `signMessage(msg)` · `verifyMessage(params)` · `resolveBns(name)` · `getNetwork()` · `getState()` · `on/off/once(event, fn)` · `address` / `isConnected` getters.
+`detectProvider(opts?)` · `new BeldexWeb3(provider, opts?)` · `connect()` · `disconnect()` · `getAddress()` · `getBalance()` · `sendTransaction(params)` · `signMessage(msg)`* · `verifyMessage(params)`* · `resolveBns(name)` · `getNetwork()` · `getState()` · `on/off/once(event, fn)` · `address` / `isConnected` getters. (*reserved — see above.)
 
 Events: `connect`, `disconnect`, `accountsChanged`, `networkChanged`, `balanceChanged`, `lock`, `unlock`.
+
+## E2E tests
+
+`e2e/run.mjs` drives the **built extension** in real Chromium over the real wire protocol: discovery, connect approve/reject, reads, client-side validation, and wallet-side revoke → `disconnect` event. Run on a desktop machine:
+
+```bash
+cd ../beldex-wallet-extension && npm run build:chrome
+cd ../bdx-web3js && npm run build
+npm i -D puppeteer     # not committed: heavyweight Chromium download
+npm run e2e            # E2E_HEADED=1 to watch it
+```
+
+Send-path testing requires a funded **testnet** wallet and a testnet LWS (`CONFIG` in the extension) — keep real sends manual.
 
 ## Development
 
@@ -117,4 +153,4 @@ npm run typecheck
 
 ## Status
 
-Phase 1 of the roadmap (SDK core). The extension-side dapp bridge (Phase 2+) is required for real end-to-end use — see `IMPLEMENTATION_PLAN.md`.
+v0.1.0 — protocol v1 implemented end-to-end against the Beldex Wallet extension (connect, reads, user-approved sends). `signMessage`/`verifyMessage` reserved pending WASM-core support. See `CHANGELOG.md`.
