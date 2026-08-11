@@ -188,7 +188,12 @@ result: {
 - The Wallet MUST enforce a single in-flight send per wallet (dapp and panel flows share the lock); a second concurrent request fails with `-32603`.
 - Errors: `4001`, `4100`, `4900`, `4999`, `-32602` (any param invalid), `-32603` (build/broadcast failure; message MUST be sanitized).
 
-### 4.6 `bdx_signMessage` — approval
+### 4.6 `bdx_signMessage` — approval — **reserved, not implemented in wallet v1**
+
+> The v1 reference wallet answers this method with `-32601 methodNotFound`: the
+> underlying WASM core (`@bdxi/beldex-app-bridge` 3.0.0) exposes no message-signing
+> primitives (see `docs/PHASE4_CAPABILITY_REPORT.md`). The schema below is frozen for
+> when a core build with sign/verify exports ships.
 
 ```ts
 params: {
@@ -203,7 +208,7 @@ result: {
 
 The approval UI MUST show the origin and the full message text (scrollable).
 
-### 4.7 `bdx_verifyMessage` — public
+### 4.7 `bdx_verifyMessage` — public — **reserved, not implemented in wallet v1** (see §4.6)
 
 ```ts
 params: { message: string; address: string; signature: string }

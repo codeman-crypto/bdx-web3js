@@ -95,6 +95,7 @@ Beldex is a private-by-default (Monero-family) chain, so this SDK is payments-or
 
 - Balances aren't public — `getBalance()` works only after the user approves `connect()`, and is answered by the wallet itself. Your app never sees the view key.
 - Every `sendTransaction`/`signMessage` requires fresh in-wallet approval. There are no allowances or auto-approvals.
+- `signMessage`/`verifyMessage` are **reserved but not yet implemented** by the wallet (its WASM core exposes no signing primitives — see `docs/PHASE4_CAPABILITY_REPORT.md`); calls currently fail with `-32601`.
 - Before `connect()`, a page can only learn that a wallet exists (`getState()`).
 
 ## API surface
