@@ -2,3 +2,4 @@ node_modules/
 dist/
 docs/IMPLEMENTATION_PLAN.md
 docs/PHASE_PROMPTS.md
+.DS_Store

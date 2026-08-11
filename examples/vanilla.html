@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bdx-web3js — vanilla demo</title>
+<style>
+  body { font-family: ui-monospace, Menlo, monospace; background: #0a0a0a; color: #eee;
+         max-width: 640px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 18px; } h1 span { color: #3EC745; }
+  button { background: #3EC745; color: #000; border: 0; padding: 10px 18px; font: inherit;
+           cursor: pointer; margin: 4px 0; }
+  button:disabled { background: #333; color: #777; cursor: default; }
+  input, select { background: #111; color: #eee; border: 1px solid #333; padding: 8px;
+                  font: inherit; width: 100%; box-sizing: border-box; margin: 4px 0; }
+  .card { border: 1px solid #222; padding: 16px; margin: 16px 0; }
+  .addr { word-break: break-all; color: #3EC745; font-size: 12px; }
+  #log { font-size: 12px; color: #999; white-space: pre-wrap; word-break: break-all; }
+  .hide { display: none; }
+</style>
+</head>
+<body>
+<h1><span>◆</span> bdx-web3js demo</h1>
+<p id="status">Detecting wallet…</p>
+
+<div id="app" class="hide">
+  <div class="card">
+    <button id="connectBtn">Connect wallet</button>
+    <div id="account" class="hide">
+      <p>Address: <span class="addr" id="address"></span></p>
+      <p>Balance: <b id="balance">…</b> BDX <small id="approx"></small></p>
+      <button id="disconnectBtn">Disconnect</button>
+    </div>
+  </div>
+
+  <div class="card hide" id="sendCard">
+    <h3>Send BDX</h3>
+    <input id="to" placeholder="Recipient address (bx…)">
+    <input id="amount" placeholder="Amount in BDX, e.g. 1.25">
+    <select id="priority">
+      <option value="1">Priority 1 — default</option>
+      <option value="5">Priority 5 — flash (instant)</option>
+    </select>
+    <button id="sendBtn">Send</button>
+  </div>
+</div>
+
+<div class="card"><div id="log"></div></div>
+
+<!-- Inline mock wallet so this page works BEFORE the extension exists.
+     It steps aside automatically when the real extension is present.
+     NOTE: the extension only injects into http:// and https:// pages — if you
+     open this file via file://, you will ALWAYS get the mock. Serve it:
+       cd bdx-web3js && python3 -m http.server 8080
+       open http://localhost:8080/examples/vanilla.html -->
+<script>
+(function mockWallet() {
+  const ADDRESS = 'bx' + 'V9Kj2mPq8RtW3nXbYcZdEfGhJkNpQrSsTuVwXyZabc123'.repeat(3).slice(0, 95)
+  let connected = false
+  const listeners = {}
+  const provider = Object.freeze({
+    isBeldex: true,
+    on: (ev, fn) => { (listeners[ev] = listeners[ev] || []).push(fn) },
+    off: (ev, fn) => { listeners[ev] = (listeners[ev] || []).filter(f => f !== fn) },
+    request: ({ method, params }) => new Promise((resolve, reject) => {
+      const ok = v => setTimeout(() => resolve(v), 150)
+      switch (method) {
+        case 'bdx_connect':
+          return setTimeout(() => {
+            if (confirm('[Mock Beldex Wallet]\n\n' + location.origin + ' wants to connect.\nShare address ' + ADDRESS.slice(0, 24) + '… ?')) {
+              connected = true; resolve({ address: ADDRESS, network: 'mainnet' })
+            } else reject({ code: 4001, message: 'User rejected' })
+          }, 100)
+        case 'bdx_disconnect': connected = false; return ok({})
+        case 'bdx_getAddress':
+          return connected ? ok({ address: ADDRESS }) : reject({ code: 4100, message: 'unauthorized' })
+        case 'bdx_getBalance':
+          return connected
+            ? ok({ total: '12500000000', unlocked: '10000000000', approximate: true, height: 3500000 })
+            : reject({ code: 4100, message: 'unauthorized' })
+        case 'bdx_sendTransaction':
+          return setTimeout(() => {
+            if (confirm('[Mock Beldex Wallet]\n\nSend to: ' + params.to + '\nAmount (atomic): ' + params.amount + '\nPriority: ' + (params.priority || 1) + '\n\nApprove?')) {
+              resolve({ txHash: Array(65).join('a'), fee: '22110000' })
+            } else reject({ code: 4001, message: 'User rejected' })
+          }, 100)
+        case 'bdx_getNetwork':
+          return ok({ nettype: 'mainnet', height: 3500000, protocolVersion: 1, walletVersion: 'mock' })
+        case 'bdx_getState': return ok({ state: 'unlocked' })
+        default: return reject({ code: -32601, message: 'method not found' })
+      }
+    })
+  })
+  // Real extension present? It wins — the mock never announces. The real
+  // inpage script runs at document_start, so window.beldex is already set
+  // (and its announce listener registered first) by the time this executes.
+  const announce = () => {
+    if (window.beldex && window.beldex !== provider) return
+    window.dispatchEvent(new CustomEvent('beldex:announceProvider', {
+      detail: Object.freeze({
+        info: { uuid: 'mock', name: 'Mock Beldex Wallet', icon: 'data:,', rdns: 'io.beldex.mock' },
+        provider
+      })
+    }))
+  }
+  window.addEventListener('beldex:requestProvider', announce)
+  setTimeout(announce, 0)
+})()
+</script>
+
+<!-- The SDK (IIFE build): run `npm run build` first. -->
+<script src="../dist/bdx-web3.global.js"></script>
+<script>
+const { BeldexWeb3, detectProvider, toAtomic, fromAtomic } = BdxWeb3
+const $ = id => document.getElementById(id)
+const log = m => { $('log').textContent = new Date().toLocaleTimeString() + '  ' + m + '\n' + $('log').textContent }
+
+// Show WHICH wallet answered the discovery handshake (mock vs real extension).
+let announcedName = null
+window.addEventListener('beldex:announceProvider', e => {
+  if (!announcedName) announcedName = e.detail?.info?.name ?? 'unknown wallet'
+})
+
+async function main() {
+  if (location.protocol === 'file:') {
+    log('file:// page — the extension cannot inject here; you will get the mock. ' +
+        'Serve over http://localhost to use the real wallet.')
+  }
+  const provider = await detectProvider({ timeoutMs: 2000 })
+  if (!provider) {
+    $('status').innerHTML = 'No wallet found — <a style="color:#3EC745" href="https://beldex.io">install Beldex Wallet</a>'
+    return
+  }
+  $('status').textContent = `Wallet detected ✓ — ${announcedName ?? 'injected provider'}`
+  log('using provider: ' + (announcedName ?? 'window.beldex'))
+  $('app').classList.remove('hide')
+  const bdx = new BeldexWeb3(provider)
+
+  bdx.on('balanceChanged', d => { $('balance').textContent = fromAtomic(d.unlocked); log('balanceChanged') })
+  bdx.on('accountsChanged', () => { log('accountsChanged — reconnect required'); reset() })
+  bdx.on('disconnect', () => { log('disconnected'); reset() })
+  // Resilience: if the approval outlives the page's request (e.g. a service-
+  // worker restart severed it), the wallet still pushes a `connect` event once
+  // the user approves — update the UI from it.
+  bdx.on('connect', async d => {
+    log('connect event: ' + d.address.slice(0, 20) + '…')
+    onConnected(d.address)
+  })
+
+  function reset() {
+    $('account').classList.add('hide'); $('sendCard').classList.add('hide')
+    $('connectBtn').disabled = false
+  }
+
+  async function onConnected(address) {
+    $('address').textContent = address
+    $('account').classList.remove('hide')
+    $('sendCard').classList.remove('hide')
+    $('connectBtn').disabled = true
+    try {
+      const b = await bdx.getBalance()
+      $('balance').textContent = fromAtomic(b.unlocked)
+      $('approx').textContent = b.approximate ? '(approx.)' : ''
+    } catch (e) {
+      log('balance failed: ' + e.message)
+    }
+  }
+
+  $('connectBtn').onclick = async () => {
+    try {
+      const { address } = await bdx.connect()
+      log('connected: ' + address.slice(0, 20) + '…')
+      await onConnected(address)
+    } catch (e) {
+      log(BeldexWeb3.isUserRejection(e) ? 'connect rejected by user' : 'connect failed: ' + e.message)
+    }
+  }
+
+  $('disconnectBtn').onclick = async () => { await bdx.disconnect(); reset(); log('disconnected') }
+
+  $('sendBtn').onclick = async () => {
+    try {
+      const { txHash, fee } = await bdx.sendTransaction({
+        to: $('to').value.trim(),
+        amount: toAtomic($('amount').value.trim()),
+        priority: Number($('priority').value)
+      })
+      log('sent! tx ' + txHash.slice(0, 16) + '… fee ' + fromAtomic(fee) + ' BDX')
+      const b = await bdx.getBalance()
+      $('balance').textContent = fromAtomic(b.unlocked)
+    } catch (e) {
+      log(BeldexWeb3.isUserRejection(e) ? 'send rejected by user' : 'send failed: ' + e.message)
+    }
+  }
+}
+main()
+</script>
+</body>
+</html>
