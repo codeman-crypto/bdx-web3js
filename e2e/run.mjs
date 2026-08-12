@@ -57,6 +57,7 @@ async function main() {
 
   const browser = await puppeteer.launch({
     headless: process.env.E2E_HEADED ? false : 'new',
+    protocolTimeout: 60_000, // fail fast instead of hanging 180s on a stuck evaluate
     args: [
       `--disable-extensions-except=${EXT}`,
       `--load-extension=${EXT}`,
@@ -98,16 +99,32 @@ async function main() {
     ok(state.detected, 'provider discovered via announce handshake')
     ok(state.state === 'unlocked', `getState() === unlocked (got ${state.state})`)
 
+    // ---- approval driver ---------------------------------------------------
+    // Decisions are driven through the extension's own message API rather than
+    // by clicking the approval UI: which surface renders (side panel vs popup)
+    // is browser/headless-dependent — sidePanel.open() can "succeed" headless
+    // without any clickable page — while DAPP_APPROVE/REJECT exercises the
+    // identical router → grant → port → SDK path deterministically. The
+    // approval UIs themselves are covered by manual/headed testing.
+    const driver = await browser.newPage()
+    await driver.goto(`chrome-extension://${extId}/panel.html?tab=1`)
+    const decide = async approve => {
+      for (let i = 0; i < 50; i++) {
+        const p = await driver.evaluate(() => chrome.runtime.sendMessage({ type: 'DAPP_LIST_PENDING' }))
+        if (p?.pendingReq) {
+          return driver.evaluate(
+            (type, reqId) => chrome.runtime.sendMessage({ type, reqId }),
+            approve ? 'DAPP_APPROVE' : 'DAPP_REJECT', p.pendingReq.reqId)
+        }
+        await sleep(100)
+      }
+      throw new Error('no pending approval appeared within 5s')
+    }
+
     // ---- connect: REJECT path ---------------------------------------------
     let connectP = page.evaluate(() =>
       window.__bdx.connect().then(r => ({ ok: true, r })).catch(e => ({ ok: false, code: e.code })))
-    let approval = await browser.waitForTarget(
-      t => t.url().includes('approval.html') || t.url().includes('panel.html'), { timeout: 10_000 })
-    let apPage = await approval.page()
-    await apPage.waitForFunction(
-      () => [...document.querySelectorAll('button')].some(b => /Reject/.test(b.textContent)), { timeout: 10_000 })
-    await apPage.evaluate(() =>
-      [...document.querySelectorAll('button')].find(b => /Reject/.test(b.textContent)).click())
+    await decide(false)
     let res = await connectP
     ok(res.ok === false && res.code === 4001, `connect rejection → 4001 (got ${JSON.stringify(res)})`)
 
@@ -115,15 +132,11 @@ async function main() {
     await sleep(300)
     connectP = page.evaluate(() =>
       window.__bdx.connect().then(r => ({ ok: true, r })).catch(e => ({ ok: false, code: e.code })))
-    approval = await browser.waitForTarget(
-      t => t.url().includes('approval.html') || t.url().includes('panel.html'), { timeout: 10_000 })
-    apPage = await approval.page()
-    await apPage.waitForFunction(
-      () => [...document.querySelectorAll('button')].some(b => /^Connect$/.test(b.textContent.trim())), { timeout: 10_000 })
-    await apPage.evaluate(() =>
-      [...document.querySelectorAll('button')].find(b => /^Connect$/.test(b.textContent.trim())).click())
+    const decision = await decide(true)
+    ok(decision?.ok === true, `DAPP_APPROVE accepted (got ${JSON.stringify(decision)})`)
     res = await connectP
-    ok(res.ok === true && res.r.address === TEST_ADDRESS, 'connect approved → address returned')
+    ok(res.ok === true && res.r.address === TEST_ADDRESS,
+      `connect approved → address returned (got ${JSON.stringify(res)})`)
 
     // ---- reads ------------------------------------------------------------
     const addr = await page.evaluate(() => window.__bdx.getAddress())
@@ -139,9 +152,7 @@ async function main() {
     // ---- revoke from the wallet → disconnect event ------------------------
     const eventP = page.evaluate(() =>
       new Promise(res => { window.__bdx.on('disconnect', () => res('disconnected')) }))
-    const bg = await browser.newPage()
-    await bg.goto(`chrome-extension://${extId}/panel.html?tab=1`)
-    await bg.evaluate(origin =>
+    await driver.evaluate(origin =>
       chrome.runtime.sendMessage({ type: 'DAPP_REVOKE_ORIGIN', origin }), `http://localhost:${PORT}`)
     ok((await Promise.race([eventP, sleep(5000).then(() => 'timeout')])) === 'disconnected',
       'revoke in wallet → disconnect event reaches the dapp')
