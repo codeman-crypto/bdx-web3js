@@ -81,7 +81,7 @@ async function main() {
         pubSpendKey: '0'.repeat(64), pubViewKey: '0'.repeat(64),
         secViewKey: '0'.repeat(64), secSpendKey: '0'.repeat(64), seed: '0'.repeat(64)
       }, TEST_PASSWORD)
-    ok(saved?.ok === true, 'seed test wallet (SAVE_WALLET)')
+    ok(saved?.ok === true, `seed test wallet (SAVE_WALLET)${saved?.ok ? '' : ` — got ${JSON.stringify(saved)}`}`)
     await panel.close()
 
     // ---- discovery + provider state ---------------------------------------
@@ -139,9 +139,6 @@ async function main() {
     // ---- revoke from the wallet → disconnect event ------------------------
     const eventP = page.evaluate(() =>
       new Promise(res => { window.__bdx.on('disconnect', () => res('disconnected')) }))
-    const sw = await swTarget.worker()
-    await sw.evaluate(origin =>
-      chrome.runtime.sendMessage ? undefined : undefined, '') // noop keepalive
     const bg = await browser.newPage()
     await bg.goto(`chrome-extension://${extId}/panel.html?tab=1`)
     await bg.evaluate(origin =>
